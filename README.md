@@ -2,7 +2,7 @@
 
 An open-source, research-oriented **scripted module for 3D Slicer** to explore three-dimensional distances between the mandibular condyle and the articular fossa using segmented surface meshes from cone-beam computed tomography (CBCT).
 
-> **Archived research implementation:** The original version used in the study is available as [v0.1.0](https://github.com/henriquetimmvieira-ufpel/TMJ-Space-Analyzer/releases/tag/v0.1.0) and archived on [Zenodo](https://doi.org/10.5281/zenodo.24286265).
+> **Archived research implementation:** The original version used in the study is available as [v0.1.0](https://github.com/henriquetimmvieira-ufpel/TMJ-Space-Analyzer/releases/tag/v0.1.0) and archived on [Zenodo](https://doi.org/10.5281/zenodo.24286265). The current version, v0.2.0, is archived under DOI [10.5281/zenodo.24290837](https://doi.org/10.5281/zenodo.24290837).
 
 ## Current features
 
@@ -76,6 +76,8 @@ No identifiable CBCT scans or patient-derived meshes should be committed to this
 
 See [CITATION.cff](CITATION.cff) for software citation metadata. The source is licensed under the [Apache License, Version 2.0](LICENSE). Cite the version actually used. The implementation used in the original study is v0.1.0,
 archived under DOI [10.5281/zenodo.24286265](https://doi.org/10.5281/zenodo.24286265).
+Version v0.2.0 is archived under DOI [10.5281/zenodo.24290837](https://doi.org/10.5281/zenodo.24290837),
+and the concept DOI [10.5281/zenodo.24286264](https://doi.org/10.5281/zenodo.24286264) always resolves to the latest version.
 
 ## Project contact
 
