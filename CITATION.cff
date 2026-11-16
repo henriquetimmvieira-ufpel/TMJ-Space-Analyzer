@@ -5,7 +5,6 @@ title: "TMJ Space Analyzer"
 authors:
   - family-names: Vieira
     given-names: Henrique Timm
-    affiliation: "Federal University of Pelotas (UFPel), Brazil"
 repository-code: "https://github.com/henriquetimmvieira-ufpel/TMJ-Space-Analyzer"
 license: "Apache-2.0"
 abstract: "Research-oriented 3D Slicer module for analysing condyle-to-fossa distances from segmented CBCT surface models."
