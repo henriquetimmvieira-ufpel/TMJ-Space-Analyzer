@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite this repository and, when available, the corresponding peer-reviewed article."
+type: software
+title: "TMJ Space Analyzer"
+authors:
+  - family-names: Vieira
+    given-names: Henrique Timm
+    orcid: "https://orcid.org/0000-0002-0616-6007"
+repository-code: "https://github.com/henriquetimmvieira-ufpel/TMJ-Space-Analyzer"
+license: "Apache-2.0"
+abstract: "Research-oriented 3D Slicer module for analysing condyle-to-fossa distances from segmented CBCT surface models."
+keywords:
+  - temporomandibular joint
+  - cone-beam computed tomography
+  - 3D Slicer
+  - scientific software
