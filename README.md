@@ -45,7 +45,7 @@ For scientific replication, record acquisition parameters, segmentation protocol
 - Continuous raw distances are stored, but the reported summary statistics use vertex-level distances rounded to 0.25 mm and capped at 4.5 mm for the colour scale.
 - Regional statistics are not currently weighted by mesh area.
 - Per-vertex 95% confidence intervals are generated, although neighbouring mesh vertices are not independent observations. These are **not valid patient-level inferential confidence intervals**.
-- The six-landmark regional subdivision uses manually selected anterior–middle and middle–posterior boundary points, not the equal-thirds geometric definition currently proposed in the revised manuscript.
+- The six-landmark regional subdivision uses manually positioned anterior–middle and middle–posterior boundaries, plus landmark-derived vertical limits. This original algorithm has been clarified in the revised manuscript and must remain unchanged when updating the statistical calculations.
 - The experimental comparisons against prior linear reference values are still exposed in the interface.
 
 Until the revised implementation is validated on the study data, **do not cite this repository state as the final, continuous, area-weighted research release**. See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
