@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
+Thumbs.db
+*.dcm
+*.nrrd
+*.nii
+*.nii.gz
+*.stl
+*.obj
+*.ply
+*.mrml
+*.mrb
+*.xlsx
+*.pdf
