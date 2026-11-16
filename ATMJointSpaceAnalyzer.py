@@ -8,6 +8,17 @@ import ctk
 
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
 
+import sys as _sys
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+if _MODULE_DIR not in _sys.path:
+    _sys.path.insert(0, _MODULE_DIR)
+from tmj_space_core import (
+    vertexAreasFromPolyData as _vertexAreas,
+    weightedQuantile as _weightedQuantile,
+    summaryStats as _summaryStats,
+    discretise as _discretise,
+)
+
 import slicer
 from slicer.ScriptedLoadableModule import *
 from slicer.util import VTKObservationMixin
@@ -38,15 +49,17 @@ except ImportError:
 class ATMJointSpaceAnalyzer(ScriptedLoadableModule):
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
-        parent.title = "ATM Joint Space Analyzer"
+        parent.title = "TMJ Space Analyzer"
         parent.categories = ["Examples"]
         parent.dependencies = []
-        parent.contributors = ["Henrique + ChatGPT"]
+        parent.contributors = ["Gabriela Schneid Rios", "Henrique Timm Vieira", "Noeli Boscato (UFPel)"]
         parent.helpText = """
+TMJ Space Analyzer (v0.2.0)
+
 Module for TMJ joint space analysis:
 1. distance map + functional condylar surface filtering
-2. manual segmentation into anterior / middle / posterior poles
-3. filtered overall statistics + pole-based statistics + reference comparison map
+2. manual segmentation into anterior / middle / posterior regions
+3. filtered overall statistics + region-based statistics + reference comparison map
 4. automatic export of standardized 3D screenshots in JPG
 5. automatic export of Step 1 and Step 3 statistics to Excel
 6. automatic export of final PDF report
@@ -74,12 +87,12 @@ class ATMJointSpaceAnalyzerWidget(ScriptedLoadableModuleWidget, VTKObservationMi
         ]
 
         self.pointDescriptions = [
-            "Most anterior limit point of the anterior condylar pole.",
+            "Most anterior limit point of the anterior condylar region.",
             "Point at the anterior–middle boundary on the most mesial aspect of the mandibular condyle.",
             "Point at the anterior–middle boundary on the most distal/lateral aspect of the mandibular condyle.",
             "Point at the middle–posterior boundary on the most mesial aspect of the mandibular condyle.",
             "Point at the middle–posterior boundary on the most distal/lateral aspect of the mandibular condyle.",
-            "Most posterior limit point of the posterior condylar pole."
+            "Most posterior limit point of the posterior condylar region."
         ]
 
         self.markupObserverTag = None
@@ -171,18 +184,18 @@ class ATMJointSpaceAnalyzerWidget(ScriptedLoadableModuleWidget, VTKObservationMi
         step1Layout.addWidget(self.runStep1Button)
 
         step2Button = ctk.ctkCollapsibleButton()
-        step2Button.text = "Step 2 — Landmark placement and pole segmentation"
+        step2Button.text = "Step 2 — Landmark placement and region segmentation"
         self.layout.addWidget(step2Button)
         step2Layout = qt.QVBoxLayout(step2Button)
 
         self.instructionsLabel = qt.QLabel(
             "Place 6 landmarks in this exact order:\n\n"
-            "1. Anterior — Most anterior limit point of the anterior condylar pole.\n"
+            "1. Anterior — Most anterior limit point of the anterior condylar region.\n"
             "2. AM_mesial — Point at the anterior–middle boundary on the most mesial aspect of the condyle.\n"
             "3. AM_distal — Point at the anterior–middle boundary on the most distal/lateral aspect of the condyle.\n"
             "4. MP_mesial — Point at the middle–posterior boundary on the most mesial aspect of the condyle.\n"
             "5. MP_distal — Point at the middle–posterior boundary on the most distal/lateral aspect of the condyle.\n"
-            "6. Posterior — Most posterior limit point of the posterior condylar pole."
+            "6. Posterior — Most posterior limit point of the posterior condylar region."
         )
         self.instructionsLabel.setWordWrap(True)
         step2Layout.addWidget(self.instructionsLabel)
@@ -572,7 +585,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         displayNode.Modified()
         slicer.app.processEvents()
 
-    def addOrUpdateColorLegend(self, modelNode, titleText="Difference from pole reference (mm)"):
+    def addOrUpdateColorLegend(self, modelNode, titleText="Difference from region reference (mm)"):
         colorLegendDisplayNode = slicer.modules.colors.logic().AddDefaultColorLegendDisplayNode(modelNode)
         colorLegendDisplayNode.SetVisibility(True)
         colorLegendDisplayNode.SetTitleText(titleText)
@@ -727,17 +740,12 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             display.SetTextScale(0.0)
         return lineNode
 
-    def meanCI95(self, values):
-        n = len(values)
-        if n == 0:
-            return (np.nan, np.nan)
-        if n == 1:
-            return (values[0], values[0])
-        meanVal = float(np.mean(values))
-        sdVal = float(np.std(values, ddof=1))
-        se = sdVal / np.sqrt(n)
-        margin = 1.96 * se
-        return (meanVal - margin, meanVal + margin)
+    def vertexAreas(self, polydata):
+        """Area weight of each vertex (shared implementation, see tmj_space_core)."""
+        return _vertexAreas(polydata)
+
+    def weightedQuantile(self, values, weights, q):
+        return _weightedQuantile(values, weights, q)
 
 
 
@@ -748,12 +756,21 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         threeDView.forceRender()
         slicer.app.processEvents()
 
-    def computeRangeDistribution(self, values, bins):
+    def computeRangeDistribution(self, values, bins, weights=None):
+        values = np.asarray(values, dtype=float)
         results = []
         n = len(values)
+        w = None
+        if weights is not None:
+            w = np.asarray(weights, dtype=float)
+            if w.size != values.size:
+                w = None
+            else:
+                w = np.where(np.isfinite(w) & (w > 0), w, 0.0)
+        totalArea = float(w.sum()) if w is not None else 0.0
         if n == 0:
             for lo, hi in bins:
-                results.append({"Range": f"{lo}-{hi} mm", "Count": 0, "Percent": 0.0})
+                results.append({"Range": f"{lo}-{hi} mm", "Count": 0, "Percent": 0.0, "PercentArea": 0.0})
             return results
         for lo, hi in bins:
             if hi == bins[-1][1]:
@@ -762,13 +779,14 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
                 mask = (values >= lo) & (values < hi)
             count = int(np.sum(mask))
             pct = float(100.0 * count / n)
-            results.append({"Range": f"{lo}-{hi} mm", "Count": count, "Percent": pct})
+            pctArea = float(100.0 * w[mask].sum() / totalArea) if (w is not None and totalArea > 0) else None
+            results.append({"Range": f"{lo}-{hi} mm", "Count": count, "Percent": pct, "PercentArea": pctArea})
         return results
 
     def formatRangeDistributionLine(self, distRows):
         return " / ".join([f"{r['Range']}: {r['Percent']:.2f}%" for r in distRows])
 
-    def computePoleDeltaDistribution(self, deltaValues, tolerance=0.5):
+    def computeRegionDeltaDistribution(self, deltaValues, tolerance=0.5):
         n = len(deltaValues)
         if n == 0:
             return {
@@ -851,40 +869,14 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
         return savedFiles
 
-    def buildStatsRow(self, groupName, vals):
-        row = {"Group": groupName, "N": int(len(vals))}
-        if len(vals) == 0:
-            row.update({
-                "Mean_mm": None,
-                "SD_mm": None,
-                "Median_mm": None,
-                "Min_mm": None,
-                "Max_mm": None,
-                "CI95_low_mm": None,
-                "CI95_high_mm": None
-            })
-            return row
-
-        meanVal = float(np.mean(vals))
-        sdVal = float(np.std(vals, ddof=0))
-        medVal = float(np.median(vals))
-        minVal = float(np.min(vals))
-        maxVal = float(np.max(vals))
-        ciLow, ciHigh = self.meanCI95(vals)
-
-        row.update({
-            "Mean_mm": meanVal,
-            "SD_mm": sdVal,
-            "Median_mm": medVal,
-            "Min_mm": minVal,
-            "Max_mm": maxVal,
-            "CI95_low_mm": ciLow,
-            "CI95_high_mm": ciHigh
-        })
+    def buildStatsRow(self, groupName, vals, weights=None):
+        """Descriptors of a distance distribution (shared implementation, see tmj_space_core)."""
+        row = {"Group": groupName}
+        row.update(_summaryStats(vals, weights))
         return row
 
     def buildPdfReport(self, pdfPath, step1Images, step3Images, step1StatsRows, step1DistRows,
-                       step2Rows, overallRows, poleRows, poleDistRows):
+                       step2Rows, overallRows, regionRows, regionDistRows):
         if not REPORTLAB_AVAILABLE:
             return False, "reportlab is not installed. PDF export was skipped."
 
@@ -937,8 +929,8 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             "- Step 1 distribution by ranges",
             "- Step 2 segmentation summary",
             "- Step 3 overall filtered statistics",
-            "- Step 3 pole-based statistics",
-            "- Step 3 pole delta distributions",
+            "- Step 3 region-based statistics",
+            "- Step 3 region delta distributions",
             "- Step 1 screenshots",
             "- Step 3 screenshots",
         ])
@@ -972,19 +964,19 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             lines.append("")
         draw_lines(lines)
 
-        c.showPage(); new_page("Step 3 Pole-Based Statistics")
+        c.showPage(); new_page("Step 3 Region-Based Statistics")
         lines = []
-        for row in poleRows:
-            lines.append(f"Pole: {row.get('Pole', '')}")
+        for row in regionRows:
+            lines.append(f"Region: {row.get('Region', '')}")
             for k, v in row.items():
-                if k != "Pole": lines.append(f"  {k}: {v}")
+                if k != "Region": lines.append(f"  {k}: {v}")
             lines.append("")
         draw_lines(lines)
 
-        c.showPage(); new_page("Step 3 Pole Delta Distributions")
+        c.showPage(); new_page("Step 3 Region Delta Distributions")
         lines = []
-        for row in poleDistRows:
-            lines.append(f"Pole: {row.get('Pole', '')}")
+        for row in regionDistRows:
+            lines.append(f"Region: {row.get('Region', '')}")
             lines.append(f"  Within ±0.5 mm: {row.get('WithinExpected_Percent', 0):.2f}% ({row.get('WithinExpected_Count', 0)})")
             lines.append(f"  Below expected (< -0.5 mm): {row.get('BelowExpected_Percent', 0):.2f}% ({row.get('BelowExpected_Count', 0)})")
             lines.append(f"  Above expected (> +0.5 mm): {row.get('AboveExpected_Percent', 0):.2f}% ({row.get('AboveExpected_Count', 0)})")
@@ -997,7 +989,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         c.save()
         return True, None
 
-    def buildSummaryPdfReport(self, pdfPath, step1Images, step3Images, step1StatsRows, step1DistRows, overallRows, poleRows, poleDistRows):
+    def buildSummaryPdfReport(self, pdfPath, step1Images, step3Images, step1StatsRows, step1DistRows, overallRows, regionRows, regionDistRows):
         if not REPORTLAB_AVAILABLE:
             return False, "reportlab is not installed. PDF summary export was skipped."
 
@@ -1052,13 +1044,13 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             row = overallRows[0]
             body(f"Mean {row.get('Mean_mm', None)} mm | SD {row.get('SD_mm', None)} | min {row.get('Min_mm', None)} | max {row.get('Max_mm', None)}", 20 * mm, y)
             y -= 10 * mm
-        section("Pole summary", y)
+        section("Region summary", y)
         y -= 8 * mm
-        poleDistMap = {r['Pole']: r for r in poleDistRows}
-        for row in poleRows:
-            pole = row.get('Pole','')
-            dist = poleDistMap.get(pole, {})
-            body(f"{pole}: mean {row.get('Mean_mm', None)} mm | ref {row.get('Reference_mm', None)} | diff {row.get('AbsoluteDifference_mm', None)}", 20 * mm, y)
+        regionDistMap = {r['Region']: r for r in regionDistRows}
+        for row in regionRows:
+            region = row.get('Region','')
+            dist = regionDistMap.get(region, {})
+            body(f"{region}: mean {row.get('Mean_mm', None)} mm | ref {row.get('Reference_mm', None)} | diff {row.get('AbsoluteDifference_mm', None)}", 20 * mm, y)
             y -= 5 * mm
             body(f"within ±0.5 mm {dist.get('WithinExpected_Percent',0):.2f}% | below {dist.get('BelowExpected_Percent',0):.2f}% | above {dist.get('AboveExpected_Percent',0):.2f}%", 24 * mm, y)
             y -= 8 * mm
@@ -1101,7 +1093,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
         step = 0.25
         maxDisplayVal = 4.5
-        discreteScalars = np.clip(np.round(fullScalarsRaw / step) * step, 0.0, maxDisplayVal)
+        discreteScalars = _discretise(fullScalarsRaw, step, maxDisplayVal)  # display only
 
         self.removeExistingArray(outputPoly, "RawAbsoluteDistance")
         rawArray = numpy_to_vtk(fullScalarsRaw, deep=True)
@@ -1134,16 +1126,22 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         filteredNode.SetAndObservePolyData(filteredPoly)
         self.setModelDisplayWithColorNode(filteredNode, "AbsoluteDistance", discreteColorNode, 0.0, 4.5)
 
-        values = discreteScalars[np.isfinite(discreteScalars)]
-        filteredMask = np.isfinite(fullScalarsRaw) & (fullScalarsRaw <= cutoffMm)
-        filtered = discreteScalars[filteredMask]
+        filteredRawArr = filteredPd.GetArray("RawAbsoluteDistance")
+        if filteredRawArr is None:
+            raise RuntimeError("The filtered condylar surface lost the RawAbsoluteDistance array.")
+
+        globalValues = fullScalarsRaw
+        globalAreas = self.vertexAreas(outputPoly)
+        filtered = vtk_to_numpy(filteredRawArr)
+        filteredAreas = self.vertexAreas(filteredPoly)
+        values = globalValues[np.isfinite(globalValues)]
 
         step1Rows = [
-            self.buildStatsRow("Global distance map", values),
-            self.buildStatsRow(f"Filtered condylar surface <= {cutoffMm:.2f} mm", filtered)
+            self.buildStatsRow("Global distance map", globalValues, globalAreas),
+            self.buildStatsRow(f"Filtered condylar surface <= {cutoffMm:.2f} mm", filtered, filteredAreas)
         ]
         bins = [(0, 1), (1, 2), (2, 4), (4, 5)]
-        step1DistRows = self.computeRangeDistribution(filtered, bins)
+        step1DistRows = self.computeRangeDistribution(filtered, bins, filteredAreas)
 
         exportedFiles = []
         excelPath = None
@@ -1189,6 +1187,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         return {
             "global_n": int(len(values)),
             "global_mean": float(np.mean(values)),
+            "global_max": float(np.max(values)) if len(values) > 0 else None,
             "filtered_n": int(len(filtered)),
             "filtered_mean": float(np.mean(filtered)) if len(filtered) > 0 else None,
             "distribution_text": self.formatRangeDistributionLine(step1DistRows),
@@ -1255,9 +1254,9 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         polyOut.GetPointData().AddArray(arr)
         polyOut.GetPointData().SetActiveScalars("AP_Manual_6pts")
 
-        polesOnlyPoly = self.thresholdPolydataByPointScalarRange(polyOut, "AP_Manual_6pts", 1, 3)
+        regionsOnlyPoly = self.thresholdPolydataByPointScalarRange(polyOut, "AP_Manual_6pts", 1, 3)
         segmentedNode = self.createOrGetModelNode("Condyle_AP_Manual_6pts")
-        segmentedNode.SetAndObservePolyData(polesOnlyPoly)
+        segmentedNode.SetAndObservePolyData(regionsOnlyPoly)
         self.setModelDisplay(segmentedNode, "AP_Manual_6pts", "Random", 1, 3)
 
         self.createLineMarkup("CutLine_AM", p_am_m, p_am_d, color=(1, 0, 0))
@@ -1277,31 +1276,36 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         if overallPoly is None or overallPoly.GetNumberOfPoints() == 0:
             raise RuntimeError("Filtered condylar surface is empty.")
 
-        overallDistanceArr = overallPoly.GetPointData().GetArray("AbsoluteDistance")
+        overallDistanceArr = overallPoly.GetPointData().GetArray("RawAbsoluteDistance")
         if overallDistanceArr is None:
-            raise RuntimeError("AbsoluteDistance array not found in CondyleFiltered_lt5mm.")
-        overallDistances = vtk_to_numpy(overallDistanceArr)
-        overallDistances = overallDistances[np.isfinite(overallDistances)]
+            raise RuntimeError("RawAbsoluteDistance array not found in CondyleFiltered_lt5mm.")
+        overallDistancesAll = vtk_to_numpy(overallDistanceArr)
+        overallAreasAll = self.vertexAreas(overallPoly)
+        overallFinite = np.isfinite(overallDistancesAll)
+        overallDistances = overallDistancesAll[overallFinite]
+        overallAreas = overallAreasAll[overallFinite]
 
         modelNode = self.getNode(segmentedModelName)
         poly = modelNode.GetPolyData()
         if poly is None or poly.GetNumberOfPoints() == 0:
-            raise RuntimeError("Segmented pole model is empty.")
+            raise RuntimeError("Segmented region model is empty.")
 
         pointData = poly.GetPointData()
         segmentArr = pointData.GetArray("AP_Manual_6pts")
-        distanceArr = pointData.GetArray("AbsoluteDistance")
+        distanceArr = pointData.GetArray("RawAbsoluteDistance")
         if segmentArr is None:
             raise RuntimeError("AP_Manual_6pts array not found.")
         if distanceArr is None:
-            raise RuntimeError("AbsoluteDistance array not found.")
+            raise RuntimeError("RawAbsoluteDistance array not found.")
 
         segments = vtk_to_numpy(segmentArr)
         distances = vtk_to_numpy(distanceArr)
+        areasAll = self.vertexAreas(poly)
 
         validMask = np.isfinite(distances)
         segments = segments[validMask]
         distances = distances[validMask]
+        areas = areasAll[validMask]
 
         labels = {1: "Posterior", 2: "Middle", 3: "Anterior"}
 
@@ -1310,42 +1314,51 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         lines.append("--- Overall filtered condylar surface ---")
         lines.append(f"N points: {len(overallDistances)}")
 
-        overallRows = [self.buildStatsRow("Overall filtered condylar surface", overallDistances)]
+        overallRows = [self.buildStatsRow("Overall filtered condylar surface", overallDistances, overallAreas)]
         if len(overallDistances) > 0:
             meanVal = float(np.mean(overallDistances)); sdVal = float(np.std(overallDistances, ddof=0)); medVal = float(np.median(overallDistances))
-            minVal = float(np.min(overallDistances)); maxVal = float(np.max(overallDistances)); ciLow, ciHigh = self.meanCI95(overallDistances)
+            minVal = float(np.min(overallDistances)); maxVal = float(np.max(overallDistances))
             lines.append(f"Mean: {meanVal:.4f} mm")
             lines.append(f"SD: {sdVal:.4f} mm")
             lines.append(f"Median: {medVal:.4f} mm")
             lines.append(f"Min: {minVal:.4f} mm")
             lines.append(f"Max: {maxVal:.4f} mm")
-            lines.append(f"95% CI: {ciLow:.4f} to {ciHigh:.4f} mm\n")
+            lines.append(f"Area-weighted mean: {overallRows[0].get('MeanAreaWeighted_mm')} mm")
+            lines.append(f"Area-weighted median: {overallRows[0].get('MedianAreaWeighted_mm')} mm\n")
         else:
             lines.append("No points available.\n")
 
-        lines.append("POLE-BASED ANALYSIS\n")
+        lines.append("REGION-BASED ANALYSIS\n")
 
         rows = []
         ref_values_per_point = np.zeros(len(segments), dtype=float)
-        poleStatsRows = []
-        poleDistRows = []
+        regionStatsRows = []
+        regionDistRows = []
 
         for segId in [1, 2, 3]:
-            vals = distances[segments == segId]
+            mask = segments == segId
+            vals = distances[mask]
+            wts = areas[mask]
             ref = referenceValues[segId]
             label = labels[segId]
-            lines.append(f"--- {label} pole ---")
+            lines.append(f"--- {label} region ---")
             lines.append(f"Reference value: {ref:.4f} mm")
-            lines.append(f"N points: {len(vals)}")
+            lines.append(f"N vertices: {len(vals)}")
 
             if len(vals) == 0:
-                lines.append("No points in this pole.\n")
-                poleStatsRows.append({"Pole":label,"Reference_mm":ref,"N":0,"Mean_mm":None,"SD_mm":None,"Median_mm":None,"Min_mm":None,"Max_mm":None,"CI95_low_mm":None,"CI95_high_mm":None,"AbsoluteDifference_mm":None,"PercentDifference":None})
-                poleDistRows.append({"Pole":label,"BelowExpected_Count":0,"BelowExpected_Percent":0.0,"WithinExpected_Count":0,"WithinExpected_Percent":0.0,"AboveExpected_Count":0,"AboveExpected_Percent":0.0})
+                lines.append("No points in this region.\n")
+                regionStatsRows.append({"Region": label, "Reference_mm": ref, "N_vertices": 0, "Mean_mm": None, "SD_mm": None,
+                                        "Median_mm": None, "Min_mm": None, "Max_mm": None, "Area_mm2": None,
+                                        "MeanAreaWeighted_mm": None, "SDAreaWeighted_mm": None, "MedianAreaWeighted_mm": None,
+                                        "AbsoluteDifference_mm": None, "PercentDifference": None})
+                regionDistRows.append({"Region": label, "BelowExpected_Count": 0, "BelowExpected_Percent": 0.0,
+                                       "WithinExpected_Count": 0, "WithinExpected_Percent": 0.0,
+                                       "AboveExpected_Count": 0, "AboveExpected_Percent": 0.0})
                 continue
 
-            meanVal = float(np.mean(vals)); sdVal = float(np.std(vals, ddof=0)); medVal = float(np.median(vals))
-            minVal = float(np.min(vals)); maxVal = float(np.max(vals)); ciLow, ciHigh = self.meanCI95(vals)
+            statsRow = self.buildStatsRow(label, vals, wts)
+            meanVal = statsRow["Mean_mm"]; sdVal = statsRow["SD_mm"]; medVal = statsRow["Median_mm"]
+            minVal = statsRow["Min_mm"]; maxVal = statsRow["Max_mm"]
             diffAbs = meanVal - ref; diffPct = ((meanVal - ref) / ref * 100.0) if ref != 0 else np.nan
 
             lines.append(f"Mean: {meanVal:.4f} mm")
@@ -1353,19 +1366,27 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             lines.append(f"Median: {medVal:.4f} mm")
             lines.append(f"Min: {minVal:.4f} mm")
             lines.append(f"Max: {maxVal:.4f} mm")
-            lines.append(f"95% CI: {ciLow:.4f} to {ciHigh:.4f} mm")
+            lines.append(f"Area-weighted mean: {statsRow.get('MeanAreaWeighted_mm')} mm")
+            lines.append(f"Area-weighted median: {statsRow.get('MedianAreaWeighted_mm')} mm")
             lines.append(f"Absolute difference vs reference: {diffAbs:+.4f} mm")
             lines.append(f"Percent difference vs reference: {diffPct:+.2f}%")
 
-            poleDeltaRaw = vals - ref
-            poleDist = self.computePoleDeltaDistribution(poleDeltaRaw, tolerance=0.5)
-            lines.append(f"Within expected (±0.5 mm): {poleDist['WithinExpected_Percent']:.2f}%")
-            lines.append(f"Below expected (< -0.5 mm): {poleDist['BelowExpected_Percent']:.2f}%")
-            lines.append(f"Above expected (> +0.5 mm): {poleDist['AboveExpected_Percent']:.2f}%\n")
+            regionDeltaRaw = vals - ref
+            regionDist = self.computeRegionDeltaDistribution(regionDeltaRaw, tolerance=0.5)
+            lines.append(f"Within expected (\u00b10.5 mm): {regionDist['WithinExpected_Percent']:.2f}%")
+            lines.append(f"Below expected (< -0.5 mm): {regionDist['BelowExpected_Percent']:.2f}%")
+            lines.append(f"Above expected (> +0.5 mm): {regionDist['AboveExpected_Percent']:.2f}%\n")
 
-            rows.append({"pole":label,"reference_mm":ref,"n":int(len(vals)),"mean_mm":meanVal,"sd_mm":sdVal,"median_mm":medVal,"min_mm":minVal,"max_mm":maxVal,"ci95_low_mm":ciLow,"ci95_high_mm":ciHigh,"diff_abs_mm":diffAbs,"diff_pct":diffPct})
-            poleStatsRows.append({"Pole":label,"Reference_mm":ref,"N":int(len(vals)),"Mean_mm":meanVal,"SD_mm":sdVal,"Median_mm":medVal,"Min_mm":minVal,"Max_mm":maxVal,"CI95_low_mm":ciLow,"CI95_high_mm":ciHigh,"AbsoluteDifference_mm":diffAbs,"PercentDifference":diffPct})
-            poleDistRows.append({"Pole":label, **poleDist})
+            rows.append({"region": label, "reference_mm": ref, "n": int(len(vals)), "mean_mm": meanVal, "sd_mm": sdVal,
+                         "median_mm": medVal, "min_mm": minVal, "max_mm": maxVal,
+                         "mean_area_weighted_mm": statsRow.get("MeanAreaWeighted_mm"),
+                         "median_area_weighted_mm": statsRow.get("MedianAreaWeighted_mm"),
+                         "absolute_difference_mm": diffAbs, "percent_difference": diffPct})
+            regionRow = {"Region": label, "Reference_mm": ref}
+            regionRow.update({k: v for k, v in statsRow.items() if k != "Group"})
+            regionRow.update({"AbsoluteDifference_mm": diffAbs, "PercentDifference": diffPct})
+            regionStatsRows.append(regionRow)
+            regionDistRows.append({"Region": label, **regionDist})
             ref_values_per_point[segments == segId] = ref
 
         referenceDeltaRaw = distances - ref_values_per_point
@@ -1383,7 +1404,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         colorNode = self.createOrUpdateDiscreteReferenceComparisonColorNode()
         self.setModelDisplayWithColorNode(compNode, "ReferenceDelta", colorNode, -2.0, 2.0)
 
-        legendNode = self.addOrUpdateColorLegend(compNode, titleText="Difference from pole reference (mm)")
+        legendNode = self.addOrUpdateColorLegend(compNode, titleText="Difference from region reference (mm)")
         legendNode.SetVisibility(True)
         self.showOnlyFinalComparison()
         self.forceRender()
@@ -1393,7 +1414,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             self.ensureDir(exportFolder)
             excelPath=self.getExcelPath(exportFolder); pdfPath=self.getPdfPath(exportFolder); summaryPdfPath=self.getPdfSummaryPath(exportFolder)
             step3Folder=self.ensureDir(os.path.join(exportFolder, "Step3"))
-            legendNode=self.addOrUpdateColorLegend(compNode, titleText="Difference from pole reference (mm)")
+            legendNode=self.addOrUpdateColorLegend(compNode, titleText="Difference from region reference (mm)")
             legendNode.SetVisibility(True)
             self.forceRender()
             exportedFiles=self.captureStandardViews(compNode, step3Folder, "Step3_ReferenceComparison")
@@ -1401,8 +1422,8 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             if OPENPYXL_AVAILABLE:
                 wb=self.getOrCreateWorkbook(excelPath)
                 self.writeSheet(wb, "Step3_OverallFiltered", overallRows)
-                self.writeSheet(wb, "Step3_Poles", poleStatsRows)
-                self.writeSheet(wb, "Step3_PoleDistribution", poleDistRows)
+                self.writeSheet(wb, "Step3_Regions", regionStatsRows)
+                self.writeSheet(wb, "Step3_RegionDistribution", regionDistRows)
                 if self.lastStep2Data.get("rows"):
                     self.writeSheet(wb, "Step2_Summary", self.lastStep2Data["rows"])
 
@@ -1432,15 +1453,15 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             step1DistRows=self.lastStep1Data.get("distribution_rows", [])
             step2Rows=self.lastStep2Data.get("rows", [])
 
-            ok,msg=self.buildPdfReport(pdfPath, step1Images, exportedFiles, step1StatsRows, step1DistRows, step2Rows, overallRows, poleStatsRows, poleDistRows)
+            ok,msg=self.buildPdfReport(pdfPath, step1Images, exportedFiles, step1StatsRows, step1DistRows, step2Rows, overallRows, regionStatsRows, regionDistRows)
             if not ok:
                 pdfWarning=msg
 
-            ok2,msg2=self.buildSummaryPdfReport(summaryPdfPath, step1Images, exportedFiles, step1StatsRows, step1DistRows, overallRows, poleStatsRows, poleDistRows)
+            ok2,msg2=self.buildSummaryPdfReport(summaryPdfPath, step1Images, exportedFiles, step1StatsRows, step1DistRows, overallRows, regionStatsRows, regionDistRows)
             if not ok2:
                 summaryPdfWarning=msg2
 
-        self.lastStep3Data = {"overall_rows": overallRows, "pole_rows": poleStatsRows, "pole_distribution_rows": poleDistRows, "images": exportedFiles}
+        self.lastStep3Data = {"overall_rows": overallRows, "region_rows": regionStatsRows, "region_distribution_rows": regionDistRows, "images": exportedFiles}
 
         lines.append("REFERENCE COMPARISON MAP")
         lines.append("Color interpretation:")
