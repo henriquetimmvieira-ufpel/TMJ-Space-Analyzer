@@ -4,10 +4,20 @@ type: software
 title: "TMJ Space Analyzer"
 version: "0.2.0"
 date-released: "2026-11-16"
-doi: "10.5281/zenodo.24286265"
+doi: "10.5281/zenodo.24286264"
 authors:
+  - family-names: Rios
+    given-names: Gabriela Schneid
+    orcid: "https://orcid.org/0009-0006-4390-6971"
+    affiliation: "Graduate Program in Dentistry, Federal University of Pelotas (UFPel), Pelotas, RS, Brazil"
   - family-names: Vieira
     given-names: Henrique Timm
+    orcid: "https://orcid.org/0000-0002-0616-6007"
+    affiliation: "Graduate Program in Dentistry, Federal University of Pelotas (UFPel), Pelotas, RS, Brazil"
+  - family-names: Boscato
+    given-names: "Noéli"
+    orcid: "https://orcid.org/0000-0002-3817-1732"
+    affiliation: "Graduate Program in Dentistry, Federal University of Pelotas (UFPel), Pelotas, RS, Brazil"
 repository-code: "https://github.com/henriquetimmvieira-ufpel/TMJ-Space-Analyzer"
 license: "Apache-2.0"
 abstract: "Research-oriented 3D Slicer module for analysing condyle-to-fossa distances from segmented CBCT surface models."

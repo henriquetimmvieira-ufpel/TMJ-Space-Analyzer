@@ -1,0 +1,29 @@
+{
+  "title": "TMJ Space Analyzer",
+  "description": "Research-oriented 3D Slicer module for analysing condyle-to-fossa distances from segmented CBCT surface models.",
+  "license": "Apache-2.0",
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "Rios, Gabriela Schneid",
+      "orcid": "0009-0006-4390-6971",
+      "affiliation": "Federal University of Pelotas (UFPel), Pelotas, RS, Brazil"
+    },
+    {
+      "name": "Vieira, Henrique Timm",
+      "orcid": "0000-0002-0616-6007",
+      "affiliation": "Federal University of Pelotas (UFPel), Pelotas, RS, Brazil"
+    },
+    {
+      "name": "Boscato, No\u00e9li",
+      "orcid": "0000-0002-3817-1732",
+      "affiliation": "Federal University of Pelotas (UFPel), Pelotas, RS, Brazil"
+    }
+  ],
+  "keywords": [
+    "temporomandibular joint",
+    "cone-beam computed tomography",
+    "3D Slicer",
+    "scientific software"
+  ]
+}
