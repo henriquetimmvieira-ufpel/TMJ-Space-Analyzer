@@ -727,18 +727,61 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             display.SetTextScale(0.0)
         return lineNode
 
-    def meanCI95(self, values):
-        n = len(values)
-        if n == 0:
-            return (np.nan, np.nan)
-        if n == 1:
-            return (values[0], values[0])
-        meanVal = float(np.mean(values))
-        sdVal = float(np.std(values, ddof=1))
-        se = sdVal / np.sqrt(n)
-        margin = 1.96 * se
-        return (meanVal - margin, meanVal + margin)
+    def vertexAreaWeights(self, polydata):
+        """One third of each incident triangle area per vertex (mm2).
 
+        The polydata must be a surface mesh. Degenerate triangles are ignored.
+        Weight arrays retain the input vertex ordering so they can be paired with
+        point-data arrays such as RawAbsoluteDistance and AP_Manual_6pts.
+        """
+        triangulator = vtk.vtkTriangleFilter()
+        triangulator.SetInputData(polydata)
+        triangulator.Update()
+        trianglesPoly = triangulator.GetOutput()
+        if trianglesPoly.GetNumberOfPoints() != polydata.GetNumberOfPoints():
+            raise RuntimeError("Triangulation changed mesh vertex count; cannot align area weights with distances.")
+
+        points = vtk_to_numpy(trianglesPoly.GetPoints().GetData()).astype(np.float64, copy=False)
+        polygonArray = trianglesPoly.GetPolys()
+        offsets = vtk_to_numpy(polygonArray.GetOffsetsArray())
+        connectivity = vtk_to_numpy(polygonArray.GetConnectivityArray())
+        if len(offsets) < 2 or len(connectivity) == 0:
+            raise RuntimeError("The surface has no triangles for area-weighted analysis.")
+        if not np.all(np.diff(offsets) == 3):
+            raise RuntimeError("The triangulated surface contains non-triangular faces.")
+        triangles = connectivity.reshape((-1, 3))
+        a, b, c = points[triangles[:, 0]], points[triangles[:, 1]], points[triangles[:, 2]]
+        faceAreas = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
+        vertexWeights = np.zeros(len(points), dtype=float)
+        np.add.at(vertexWeights, triangles.ravel(), np.repeat(faceAreas / 3.0, 3))
+        if np.sum(vertexWeights) <= 0:
+            raise RuntimeError("The surface contains no non-degenerate triangles.")
+        return vertexWeights
+
+    def weightedStats(self, values, areaWeights):
+        """Descriptive surface statistics; no pseudo-independent per-vertex CIs."""
+        values = np.asarray(values, dtype=float)
+        areaWeights = np.asarray(areaWeights, dtype=float)
+        if values.shape != areaWeights.shape:
+            raise RuntimeError("Distance and vertex area arrays have different shapes.")
+        valid = np.isfinite(values) & np.isfinite(areaWeights) & (areaWeights > 0)
+        values, areaWeights = values[valid], areaWeights[valid]
+        if not len(values):
+            return {"N": 0, "Area_mm2": 0.0, "Mean_mm": None, "SD_mm": None,
+                    "Median_mm": None, "Min_mm": None, "Max_mm": None}
+        totalArea = float(areaWeights.sum())
+        avg = float(np.dot(values, areaWeights) / totalArea)
+        sd = float(np.sqrt(np.dot(areaWeights, (values - avg) ** 2) / totalArea))
+        order = np.argsort(values, kind="stable")
+        orderedValues = values[order]
+        orderedWeights = areaWeights[order]
+        # Interpolate between weighted observation midpoints; equals numpy's
+        # ordinary median when all weights are equal (including even N).
+        midpoints = np.cumsum(orderedWeights) - 0.5 * orderedWeights
+        med = float(np.interp(0.5 * totalArea, midpoints, orderedValues))
+        return {"N": int(len(values)), "Area_mm2": totalArea,
+                "Mean_mm": avg, "SD_mm": sd, "Median_mm": med,
+                "Min_mm": float(np.min(values)), "Max_mm": float(np.max(values))}
 
 
     def forceRender(self):
@@ -748,41 +791,39 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         threeDView.forceRender()
         slicer.app.processEvents()
 
-    def computeRangeDistribution(self, values, bins):
+    def computeRangeDistribution(self, values, bins, areaWeights):
         results = []
-        n = len(values)
-        if n == 0:
-            for lo, hi in bins:
-                results.append({"Range": f"{lo}-{hi} mm", "Count": 0, "Percent": 0.0})
-            return results
+        values = np.asarray(values, dtype=float)
+        areaWeights = np.asarray(areaWeights, dtype=float)
+        valid = np.isfinite(values) & np.isfinite(areaWeights) & (areaWeights > 0)
+        values, areaWeights = values[valid], areaWeights[valid]
+        totalArea = float(areaWeights.sum())
         for lo, hi in bins:
-            if hi == bins[-1][1]:
-                mask = (values >= lo) & (values <= hi)
-            else:
-                mask = (values >= lo) & (values < hi)
-            count = int(np.sum(mask))
-            pct = float(100.0 * count / n)
-            results.append({"Range": f"{lo}-{hi} mm", "Count": count, "Percent": pct})
+            mask = (values >= lo) & ((values <= hi) if hi == bins[-1][1] else (values < hi))
+            selectedArea = float(areaWeights[mask].sum())
+            results.append({"Range": f"{lo}-{hi} mm", "Count": int(np.sum(mask)),
+                            "Area_mm2": selectedArea,
+                            "Percent": 100.0 * selectedArea / totalArea if totalArea > 0 else 0.0})
         return results
 
     def formatRangeDistributionLine(self, distRows):
         return " / ".join([f"{r['Range']}: {r['Percent']:.2f}%" for r in distRows])
 
-    def computePoleDeltaDistribution(self, deltaValues, tolerance=0.5):
-        n = len(deltaValues)
-        if n == 0:
-            return {
-                "BelowExpected_Count": 0, "BelowExpected_Percent": 0.0,
-                "WithinExpected_Count": 0, "WithinExpected_Percent": 0.0,
-                "AboveExpected_Count": 0, "AboveExpected_Percent": 0.0
-            }
-        below = int(np.sum(deltaValues < -tolerance))
-        within = int(np.sum((deltaValues >= -tolerance) & (deltaValues <= tolerance)))
-        above = int(np.sum(deltaValues > tolerance))
+    def computePoleDeltaDistribution(self, deltaValues, areaWeights, tolerance=0.5):
+        deltaValues = np.asarray(deltaValues, dtype=float)
+        areaWeights = np.asarray(areaWeights, dtype=float)
+        valid = np.isfinite(deltaValues) & np.isfinite(areaWeights) & (areaWeights > 0)
+        deltaValues, areaWeights = deltaValues[valid], areaWeights[valid]
+        totalArea = float(areaWeights.sum())
+        below = deltaValues < -tolerance
+        within = (deltaValues >= -tolerance) & (deltaValues <= tolerance)
+        above = deltaValues > tolerance
+        def percentage(mask):
+            return 100.0 * float(areaWeights[mask].sum()) / totalArea if totalArea else 0.0
         return {
-            "BelowExpected_Count": below, "BelowExpected_Percent": 100.0 * below / n,
-            "WithinExpected_Count": within, "WithinExpected_Percent": 100.0 * within / n,
-            "AboveExpected_Count": above, "AboveExpected_Percent": 100.0 * above / n
+            "BelowExpected_Count": int(np.sum(below)), "BelowExpected_Percent": percentage(below),
+            "WithinExpected_Count": int(np.sum(within)), "WithinExpected_Percent": percentage(within),
+            "AboveExpected_Count": int(np.sum(above)), "AboveExpected_Percent": percentage(above)
         }
 
     def setCameraToStandardView(self, modelNode, viewName):
@@ -851,37 +892,8 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
         return savedFiles
 
-    def buildStatsRow(self, groupName, vals):
-        row = {"Group": groupName, "N": int(len(vals))}
-        if len(vals) == 0:
-            row.update({
-                "Mean_mm": None,
-                "SD_mm": None,
-                "Median_mm": None,
-                "Min_mm": None,
-                "Max_mm": None,
-                "CI95_low_mm": None,
-                "CI95_high_mm": None
-            })
-            return row
-
-        meanVal = float(np.mean(vals))
-        sdVal = float(np.std(vals, ddof=0))
-        medVal = float(np.median(vals))
-        minVal = float(np.min(vals))
-        maxVal = float(np.max(vals))
-        ciLow, ciHigh = self.meanCI95(vals)
-
-        row.update({
-            "Mean_mm": meanVal,
-            "SD_mm": sdVal,
-            "Median_mm": medVal,
-            "Min_mm": minVal,
-            "Max_mm": maxVal,
-            "CI95_low_mm": ciLow,
-            "CI95_high_mm": ciHigh
-        })
-        return row
+    def buildStatsRow(self, groupName, vals, areaWeights):
+        return {"Group": groupName, **self.weightedStats(vals, areaWeights)}
 
     def buildPdfReport(self, pdfPath, step1Images, step3Images, step1StatsRows, step1DistRows,
                        step2Rows, overallRows, poleRows, poleDistRows):
@@ -953,7 +965,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         if step1DistRows:
             lines.append("Step 1 filtered distribution by ranges:")
             for row in step1DistRows:
-                lines.append(f"  {row.get('Range', '')}: {row.get('Percent', 0):.2f}% ({row.get('Count', 0)} points)")
+                lines.append(f"  {row.get('Range', '')}: {row.get('Percent', 0):.2f}% of area ({row.get('Area_mm2', 0):.2f} mm2)")
         draw_lines(lines)
 
         c.showPage(); new_page("Step 2 Segmentation Summary")
