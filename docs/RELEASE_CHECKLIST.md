@@ -5,7 +5,7 @@ This checklist captures differences identified between the **uploaded Python sou
 - [ ] Implement and validate continuous-distance statistics (no 0.25-mm rounding or 4.5-mm upper cap for calculation).
 - [ ] Implement and validate area-weighted regional statistics; specify the precise treatment of triangle areas and region boundaries.
 - [ ] Remove or clearly restrict the per-vertex confidence intervals so that spatially correlated vertices are not treated as independent subjects.
-- [ ] Reconcile and document the actual six-landmark subdivision procedure. The current code uses user-placed anterior–middle and middle–posterior boundary landmarks and vertical cutoffs; this differs from the equal-third procedure described in the revised manuscript.
+- [x] Reconcile the six-landmark subdivision description with the original code: user-defined anterior–middle and middle–posterior boundaries and landmark-derived vertical cutoffs. The revised manuscript now describes these correctly. Preserve the Stage 2 algorithm in future updates.
 - [ ] Ensure experimental comparisons with linear reference values are explicitly labelled **experimental / not clinically validated** in the UI and reports.
 - [ ] Test the implementation on anonymised study meshes and compare reproducibility, mean/median/minimum values, and sensitivity analyses against the paper's final results.
 - [ ] Record the 3D Slicer version, dependencies, installation requirements and automated or manual validation procedure.
