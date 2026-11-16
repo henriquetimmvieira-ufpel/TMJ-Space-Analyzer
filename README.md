@@ -2,7 +2,7 @@
 
 An open-source, research-oriented **scripted module for 3D Slicer** to explore three-dimensional distances between the mandibular condyle and the articular fossa using segmented surface meshes from cone-beam computed tomography (CBCT).
 
-> **Development snapshot:** This repository currently contains the original `ATMJointSpaceAnalyzer.py` supplied on 16 November 2026. It is **not yet the validated version 1.0.0** described in the revised manuscript. Please read the [release checklist](docs/RELEASE_CHECKLIST.md) before treating the software as a reproducible scientific release.
+> **Archived research implementation:** The original version used in the study is available as [v0.1.0](https://github.com/henriquetimmvieira-ufpel/TMJ-Space-Analyzer/releases/tag/v0.1.0) and archived on [Zenodo](https://doi.org/10.5281/zenodo.24286265).
 
 ## Current features
 
@@ -28,7 +28,7 @@ An open-source, research-oriented **scripted module for 3D Slicer** to explore t
 3. Open **ATM Joint Space Analyzer** in the module selector.
 4. If Excel or PDF export is unavailable, install the optional dependencies in Slicer's Python environment, for example from its Python console: `slicer.util.pip_install("openpyxl reportlab")`.
 
-These steps describe manual loading of the development snapshot; publishing through the official 3D Slicer Extensions Index has not been established.
+These steps describe manual loading of the scripted module; publishing through the official 3D Slicer Extensions Index has not been established.
 
 ## Current workflow
 
@@ -38,17 +38,11 @@ These steps describe manual loading of the development snapshot; publishing thro
 
 For scientific replication, record acquisition parameters, segmentation protocol, mesh-preprocessing operations, landmark positions, software revision and filtering threshold.
 
-## Status and methodological caveats
+## Research implementation notes
 
-**The uploaded source and the revised manuscript are not yet fully aligned.** In this snapshot:
+Version v0.1.0 preserves the original implementation: continuous distances are calculated and stored internally, while numerical summaries use vertex-based distances rounded to 0.25 mm (capped at 4.5 mm). Area-weighted statistics are not implemented in this version. The software-generated vertex-level confidence intervals should not be interpreted as patient-level inferential intervals.
 
-- Continuous raw distances are stored, but the reported summary statistics use vertex-level distances rounded to 0.25 mm and capped at 4.5 mm for the colour scale.
-- Regional statistics are not currently weighted by mesh area.
-- Per-vertex 95% confidence intervals are generated, although neighbouring mesh vertices are not independent observations. These are **not valid patient-level inferential confidence intervals**.
-- The six-landmark regional subdivision uses manually selected anterior–middle and middle–posterior boundary points, not the equal-thirds geometric definition currently proposed in the revised manuscript.
-- The experimental comparisons against prior linear reference values are still exposed in the interface.
-
-Until the revised implementation is validated on the study data, **do not cite this repository state as the final, continuous, area-weighted research release**. See [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
+The anterior, middle and posterior regions are defined using six manually placed anatomical landmarks, including user-defined anterior–middle and middle–posterior boundaries. Comparison with published linear reference values is exploratory and not clinically validated.
 
 ## Data and privacy
 
@@ -56,7 +50,7 @@ No identifiable CBCT scans or patient-derived meshes should be committed to this
 
 ## Citation and licence
 
-See [CITATION.cff](CITATION.cff) for software citation metadata. The source is licensed under the [Apache License, Version 2.0](LICENSE). A DOI will be added only after a verified versioned release has been archived.
+See [CITATION.cff](CITATION.cff) for software citation metadata. The source is licensed under the [Apache License, Version 2.0](LICENSE). Cite the archived v0.1.0 version using DOI [10.5281/zenodo.24286265](https://doi.org/10.5281/zenodo.24286265).
 
 ## Project contact
 
