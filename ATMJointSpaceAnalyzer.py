@@ -1146,16 +1146,22 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         filteredNode.SetAndObservePolyData(filteredPoly)
         self.setModelDisplayWithColorNode(filteredNode, "AbsoluteDistance", discreteColorNode, 0.0, 4.5)
 
-        values = discreteScalars[np.isfinite(discreteScalars)]
-        filteredMask = np.isfinite(fullScalarsRaw) & (fullScalarsRaw <= cutoffMm)
-        filtered = discreteScalars[filteredMask]
+        # All descriptive statistics are continuous and surface-area weighted.
+        # Quantised distances are retained exclusively for colour-map display.
+        values = fullScalarsRaw
+        valueWeights = self.vertexAreaWeights(outputPoly)
+        filteredRawArray = filteredPd.GetArray("RawAbsoluteDistance")
+        if filteredRawArray is None:
+            raise RuntimeError("The filtered surface lost the RawAbsoluteDistance array.")
+        filtered = vtk_to_numpy(filteredRawArray)
+        filteredWeights = self.vertexAreaWeights(filteredPoly)
 
         step1Rows = [
-            self.buildStatsRow("Global distance map", values),
-            self.buildStatsRow(f"Filtered condylar surface <= {cutoffMm:.2f} mm", filtered)
+            self.buildStatsRow("Global distance map", values, valueWeights),
+            self.buildStatsRow(f"Filtered condylar surface <= {cutoffMm:.2f} mm", filtered, filteredWeights)
         ]
         bins = [(0, 1), (1, 2), (2, 4), (4, 5)]
-        step1DistRows = self.computeRangeDistribution(filtered, bins)
+        step1DistRows = self.computeRangeDistribution(filtered, bins, filteredWeights)
 
         exportedFiles = []
         excelPath = None
@@ -1200,9 +1206,9 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
         return {
             "global_n": int(len(values)),
-            "global_mean": float(np.mean(values)),
-            "filtered_n": int(len(filtered)),
-            "filtered_mean": float(np.mean(filtered)) if len(filtered) > 0 else None,
+            "global_mean": step1Rows[0]["Mean_mm"],
+            "filtered_n": step1Rows[1]["N"],
+            "filtered_mean": step1Rows[1]["Mean_mm"],
             "distribution_text": self.formatRangeDistributionLine(step1DistRows),
             "exported_step1_images": exportedFiles,
             "step1_rows": step1Rows,
