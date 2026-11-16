@@ -1295,11 +1295,11 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         if overallPoly is None or overallPoly.GetNumberOfPoints() == 0:
             raise RuntimeError("Filtered condylar surface is empty.")
 
-        overallDistanceArr = overallPoly.GetPointData().GetArray("AbsoluteDistance")
+        overallDistanceArr = overallPoly.GetPointData().GetArray("RawAbsoluteDistance")
         if overallDistanceArr is None:
-            raise RuntimeError("AbsoluteDistance array not found in CondyleFiltered_lt5mm.")
+            raise RuntimeError("RawAbsoluteDistance array not found in CondyleFiltered_lt5mm.")
         overallDistances = vtk_to_numpy(overallDistanceArr)
-        overallDistances = overallDistances[np.isfinite(overallDistances)]
+        overallWeights = self.vertexAreaWeights(overallPoly)
 
         modelNode = self.getNode(segmentedModelName)
         poly = modelNode.GetPolyData()
@@ -1308,18 +1308,20 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
         pointData = poly.GetPointData()
         segmentArr = pointData.GetArray("AP_Manual_6pts")
-        distanceArr = pointData.GetArray("AbsoluteDistance")
+        distanceArr = pointData.GetArray("RawAbsoluteDistance")
         if segmentArr is None:
             raise RuntimeError("AP_Manual_6pts array not found.")
         if distanceArr is None:
-            raise RuntimeError("AbsoluteDistance array not found.")
+            raise RuntimeError("RawAbsoluteDistance array not found.")
 
         segments = vtk_to_numpy(segmentArr)
         distances = vtk_to_numpy(distanceArr)
+        areaWeights = self.vertexAreaWeights(poly)
 
-        validMask = np.isfinite(distances)
+        validMask = np.isfinite(distances) & np.isfinite(areaWeights) & (areaWeights > 0)
         segments = segments[validMask]
         distances = distances[validMask]
+        areaWeights = areaWeights[validMask]
 
         labels = {1: "Posterior", 2: "Middle", 3: "Anterior"}
 
@@ -1328,16 +1330,15 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         lines.append("--- Overall filtered condylar surface ---")
         lines.append(f"N points: {len(overallDistances)}")
 
-        overallRows = [self.buildStatsRow("Overall filtered condylar surface", overallDistances)]
-        if len(overallDistances) > 0:
-            meanVal = float(np.mean(overallDistances)); sdVal = float(np.std(overallDistances, ddof=0)); medVal = float(np.median(overallDistances))
-            minVal = float(np.min(overallDistances)); maxVal = float(np.max(overallDistances)); ciLow, ciHigh = self.meanCI95(overallDistances)
-            lines.append(f"Mean: {meanVal:.4f} mm")
-            lines.append(f"SD: {sdVal:.4f} mm")
-            lines.append(f"Median: {medVal:.4f} mm")
-            lines.append(f"Min: {minVal:.4f} mm")
-            lines.append(f"Max: {maxVal:.4f} mm")
-            lines.append(f"95% CI: {ciLow:.4f} to {ciHigh:.4f} mm\n")
+        overallRows = [self.buildStatsRow("Overall filtered condylar surface", overallDistances, overallWeights)]
+        if overallRows[0]["N"] > 0:
+            stats = overallRows[0]
+            lines.append(f"Surface area: {stats['Area_mm2']:.4f} mm2")
+            lines.append(f"Mean (area-weighted): {stats['Mean_mm']:.4f} mm")
+            lines.append(f"SD (area-weighted): {stats['SD_mm']:.4f} mm")
+            lines.append(f"Median (area-weighted): {stats['Median_mm']:.4f} mm")
+            lines.append(f"Min: {stats['Min_mm']:.4f} mm")
+            lines.append(f"Max: {stats['Max_mm']:.4f} mm\n")
         else:
             lines.append("No points available.\n")
 
@@ -1349,7 +1350,9 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         poleDistRows = []
 
         for segId in [1, 2, 3]:
-            vals = distances[segments == segId]
+            mask = segments == segId
+            vals = distances[mask]
+            weights = areaWeights[mask]
             ref = referenceValues[segId]
             label = labels[segId]
             lines.append(f"--- {label} pole ---")
@@ -1358,12 +1361,13 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
             if len(vals) == 0:
                 lines.append("No points in this pole.\n")
-                poleStatsRows.append({"Pole":label,"Reference_mm":ref,"N":0,"Mean_mm":None,"SD_mm":None,"Median_mm":None,"Min_mm":None,"Max_mm":None,"CI95_low_mm":None,"CI95_high_mm":None,"AbsoluteDifference_mm":None,"PercentDifference":None})
+                poleStatsRows.append({"Pole":label,"Reference_mm":ref, **self.weightedStats(vals, weights), "AbsoluteDifference_mm":None,"PercentDifference":None})
                 poleDistRows.append({"Pole":label,"BelowExpected_Count":0,"BelowExpected_Percent":0.0,"WithinExpected_Count":0,"WithinExpected_Percent":0.0,"AboveExpected_Count":0,"AboveExpected_Percent":0.0})
                 continue
 
-            meanVal = float(np.mean(vals)); sdVal = float(np.std(vals, ddof=0)); medVal = float(np.median(vals))
-            minVal = float(np.min(vals)); maxVal = float(np.max(vals)); ciLow, ciHigh = self.meanCI95(vals)
+            stats = self.weightedStats(vals, weights)
+            meanVal, sdVal = stats["Mean_mm"], stats["SD_mm"]
+            medVal, minVal, maxVal = stats["Median_mm"], stats["Min_mm"], stats["Max_mm"]
             diffAbs = meanVal - ref; diffPct = ((meanVal - ref) / ref * 100.0) if ref != 0 else np.nan
 
             lines.append(f"Mean: {meanVal:.4f} mm")
@@ -1371,18 +1375,17 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             lines.append(f"Median: {medVal:.4f} mm")
             lines.append(f"Min: {minVal:.4f} mm")
             lines.append(f"Max: {maxVal:.4f} mm")
-            lines.append(f"95% CI: {ciLow:.4f} to {ciHigh:.4f} mm")
             lines.append(f"Absolute difference vs reference: {diffAbs:+.4f} mm")
             lines.append(f"Percent difference vs reference: {diffPct:+.2f}%")
 
             poleDeltaRaw = vals - ref
-            poleDist = self.computePoleDeltaDistribution(poleDeltaRaw, tolerance=0.5)
+            poleDist = self.computePoleDeltaDistribution(poleDeltaRaw, weights, tolerance=0.5)
             lines.append(f"Within expected (±0.5 mm): {poleDist['WithinExpected_Percent']:.2f}%")
             lines.append(f"Below expected (< -0.5 mm): {poleDist['BelowExpected_Percent']:.2f}%")
             lines.append(f"Above expected (> +0.5 mm): {poleDist['AboveExpected_Percent']:.2f}%\n")
 
-            rows.append({"pole":label,"reference_mm":ref,"n":int(len(vals)),"mean_mm":meanVal,"sd_mm":sdVal,"median_mm":medVal,"min_mm":minVal,"max_mm":maxVal,"ci95_low_mm":ciLow,"ci95_high_mm":ciHigh,"diff_abs_mm":diffAbs,"diff_pct":diffPct})
-            poleStatsRows.append({"Pole":label,"Reference_mm":ref,"N":int(len(vals)),"Mean_mm":meanVal,"SD_mm":sdVal,"Median_mm":medVal,"Min_mm":minVal,"Max_mm":maxVal,"CI95_low_mm":ciLow,"CI95_high_mm":ciHigh,"AbsoluteDifference_mm":diffAbs,"PercentDifference":diffPct})
+            rows.append({"pole":label,"reference_mm":ref,"n":stats["N"],"area_mm2":stats["Area_mm2"],"mean_mm":meanVal,"sd_mm":sdVal,"median_mm":medVal,"min_mm":minVal,"max_mm":maxVal,"diff_abs_mm":diffAbs,"diff_pct":diffPct})
+            poleStatsRows.append({"Pole":label,"Reference_mm":ref, **stats,"AbsoluteDifference_mm":diffAbs,"PercentDifference":diffPct})
             poleDistRows.append({"Pole":label, **poleDist})
             ref_values_per_point[segments == segId] = ref
 
