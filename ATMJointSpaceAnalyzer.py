@@ -171,7 +171,7 @@ class ATMJointSpaceAnalyzerWidget(ScriptedLoadableModuleWidget, VTKObservationMi
         step1Layout.addWidget(self.runStep1Button)
 
         step2Button = ctk.ctkCollapsibleButton()
-        step2Button.text = "Step 2 — Landmark placement and pole segmentation"
+        step2Button.text = "Step 2 — Landmark placement and regional subdivision"
         self.layout.addWidget(step2Button)
         step2Layout = qt.QVBoxLayout(step2Button)
 
@@ -576,9 +576,12 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         colorLegendDisplayNode = slicer.modules.colors.logic().AddDefaultColorLegendDisplayNode(modelNode)
         colorLegendDisplayNode.SetVisibility(True)
         colorLegendDisplayNode.SetTitleText(titleText)
-        colorLegendDisplayNode.SetLabelFormat("%0.2f")
-        colorLegendDisplayNode.SetSize(0.12, 0.5)
-        colorLegendDisplayNode.SetPosition(0.85, 0.15)
+        colorLegendDisplayNode.SetUseColorNamesForLabels(False)
+        colorLegendDisplayNode.SetNumberOfLabels(5)
+        colorLegendDisplayNode.SetMaxNumberOfColors(19)
+        colorLegendDisplayNode.SetLabelFormat("%.1f")
+        colorLegendDisplayNode.SetSize(0.10, 0.42)
+        colorLegendDisplayNode.SetPosition(0.91, 0.50)
         return colorLegendDisplayNode
 
     def showOnlyFinalComparison(self):
@@ -1087,6 +1090,14 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
     # STEP 1
     # ------------------------
     def runStep1(self, sourceNode, targetNode, cutoffMm=5.0, exportFolder=""):
+        sourceId = sourceNode.GetID() if hasattr(sourceNode, "GetID") else None
+        targetId = targetNode.GetID() if hasattr(targetNode, "GetID") else None
+        if sourceNode is targetNode or (sourceId and sourceId == targetId):
+            raise RuntimeError(
+                "The condyle and articular-cavity selectors point to the same model. "
+                "Select two distinct anatomical surface meshes before running Step 1."
+            )
+
         sourcePoly = sourceNode.GetPolyData()
         targetPoly = targetNode.GetPolyData()
 
@@ -1114,6 +1125,15 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
         fullScalarsRaw = vtk_to_numpy(distanceScalars)
         fullScalarsRaw = np.abs(fullScalarsRaw)
+        if fullScalarsRaw.size == 0 or not np.all(np.isfinite(fullScalarsRaw)):
+            raise RuntimeError("The distance calculation returned no valid finite values.")
+        if float(np.max(fullScalarsRaw)) <= 1e-6:
+            raise RuntimeError(
+                "All condyle-to-fossa distances are zero. The two input surfaces may "
+                "be identical or coincident. Check the Condyle and Articular cavity "
+                "model selectors and reload the original STL meshes if necessary. "
+                "No report was exported for this invalid distance map."
+            )
 
         step = 0.25
         maxDisplayVal = 4.5
@@ -1135,7 +1155,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
         discreteColorNode = self.createOrUpdateDiscreteDistanceColorNode()
         self.setModelDisplayWithColorNode(distanceNode, "AbsoluteDistance", discreteColorNode, 0.0, 4.5)
-        legendNode = self.addOrUpdateColorLegend(distanceNode, titleText="Distance to articular cavity (mm)")
+        legendNode = self.addOrUpdateColorLegend(distanceNode, titleText="Joint-space distance (mm)")
         legendNode.SetVisibility(True)
         self.forceRender()
 
@@ -1177,7 +1197,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
             step1Folder = self.ensureDir(os.path.join(exportFolder, "Step1"))
             self.showOnlyNodes(["JointSpaceDistanceMap"])
-            legendNode = self.addOrUpdateColorLegend(distanceNode, titleText="Distance to articular cavity (mm)")
+            legendNode = self.addOrUpdateColorLegend(distanceNode, titleText="Joint-space distance (mm)")
             legendNode.SetVisibility(True)
             self.forceRender()
             exportedFiles = self.captureStandardViews(distanceNode, step1Folder, "Step1_DistanceMap")
@@ -1408,7 +1428,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         colorNode = self.createOrUpdateDiscreteReferenceComparisonColorNode()
         self.setModelDisplayWithColorNode(compNode, "ReferenceDelta", colorNode, -2.0, 2.0)
 
-        legendNode = self.addOrUpdateColorLegend(compNode, titleText="Difference from experimental reference (mm)")
+        legendNode = self.addOrUpdateColorLegend(compNode, titleText="Experimental difference (mm)")
         legendNode.SetVisibility(True)
         self.showOnlyFinalComparison()
         self.forceRender()
@@ -1418,7 +1438,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             self.ensureDir(exportFolder)
             excelPath=self.getExcelPath(exportFolder); pdfPath=self.getPdfPath(exportFolder); summaryPdfPath=self.getPdfSummaryPath(exportFolder)
             step3Folder=self.ensureDir(os.path.join(exportFolder, "Step3"))
-            legendNode=self.addOrUpdateColorLegend(compNode, titleText="Difference from experimental reference (mm)")
+            legendNode=self.addOrUpdateColorLegend(compNode, titleText="Experimental difference (mm)")
             legendNode.SetVisibility(True)
             self.forceRender()
             exportedFiles=self.captureStandardViews(compNode, step3Folder, "Step3_ReferenceComparison")
