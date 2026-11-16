@@ -2,6 +2,9 @@ cff-version: 1.2.0
 message: "If you use this software, please cite this repository and, when available, the corresponding peer-reviewed article."
 type: software
 title: "TMJ Space Analyzer"
+version: "0.2.0"
+date-released: "2026-11-16"
+doi: "10.5281/zenodo.24286265"
 authors:
   - family-names: Vieira
     given-names: Henrique Timm
