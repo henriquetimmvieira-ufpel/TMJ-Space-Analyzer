@@ -199,7 +199,7 @@ class ATMJointSpaceAnalyzerWidget(ScriptedLoadableModuleWidget, VTKObservationMi
         step2Layout.addWidget(self.runStep2Button)
 
         step3Button = ctk.ctkCollapsibleButton()
-        step3Button.text = "Step 3 — Final statistics and reference comparison"
+        step3Button.text = "Step 3 — Final statistics and experimental reference comparison"
         self.layout.addWidget(step3Button)
         step3Layout = qt.QVBoxLayout(step3Button)
 
@@ -944,13 +944,14 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             f"Step 3 images exported: {len(step3Images)}",
             f"Excel export available: {'Yes' if OPENPYXL_AVAILABLE else 'No'}",
             "",
+            "NOTE: Linear reference values are experimental and not clinically validated.",
             "Included sections:",
             "- Step 1 statistics",
             "- Step 1 distribution by ranges",
             "- Step 2 segmentation summary",
             "- Step 3 overall filtered statistics",
-            "- Step 3 pole-based statistics",
-            "- Step 3 pole delta distributions",
+            "- Step 3 regional statistics",
+            "- Step 3 experimental reference distributions",
             "- Step 1 screenshots",
             "- Step 3 screenshots",
         ])
@@ -960,7 +961,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         for row in step1StatsRows:
             lines.append(f"Group: {row.get('Group', '')}")
             for k, v in row.items():
-                if k != "Group": lines.append(f"  {k}: {v}")
+                if k != "Group": lines.append(f"  {k}: {v:.4f}" if isinstance(v, (float, np.floating)) else f"  {k}: {v}")
             lines.append("")
         if step1DistRows:
             lines.append("Step 1 filtered distribution by ranges:")
@@ -980,23 +981,23 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         for row in overallRows:
             lines.append(f"Group: {row.get('Group', '')}")
             for k, v in row.items():
-                if k != "Group": lines.append(f"  {k}: {v}")
+                if k != "Group": lines.append(f"  {k}: {v:.4f}" if isinstance(v, (float, np.floating)) else f"  {k}: {v}")
             lines.append("")
         draw_lines(lines)
 
-        c.showPage(); new_page("Step 3 Pole-Based Statistics")
+        c.showPage(); new_page("Step 3 Regional Statistics")
         lines = []
         for row in poleRows:
-            lines.append(f"Pole: {row.get('Pole', '')}")
+            lines.append(f"Region: {row.get('Pole', '')}")
             for k, v in row.items():
-                if k != "Pole": lines.append(f"  {k}: {v}")
+                if k != "Pole": lines.append(f"  {k}: {v:.4f}" if isinstance(v, (float, np.floating)) else f"  {k}: {v}")
             lines.append("")
         draw_lines(lines)
 
-        c.showPage(); new_page("Step 3 Pole Delta Distributions")
+        c.showPage(); new_page("Experimental Reference Comparison (not clinically validated)")
         lines = []
         for row in poleDistRows:
-            lines.append(f"Pole: {row.get('Pole', '')}")
+            lines.append(f"Region: {row.get('Pole', '')}")
             lines.append(f"  Within ±0.5 mm: {row.get('WithinExpected_Percent', 0):.2f}% ({row.get('WithinExpected_Count', 0)})")
             lines.append(f"  Below expected (< -0.5 mm): {row.get('BelowExpected_Percent', 0):.2f}% ({row.get('BelowExpected_Count', 0)})")
             lines.append(f"  Above expected (> +0.5 mm): {row.get('AboveExpected_Percent', 0):.2f}% ({row.get('AboveExpected_Count', 0)})")
@@ -1028,6 +1029,9 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             c.setFont("Helvetica", size)
             c.drawString(x, y, str(txt))
 
+        def number(value):
+            return "n/a" if value is None else f"{value:.3f}"
+
         def draw_big_images(imagePaths, y_top, titleText):
             section(titleText, y_top)
             y = y_top - 8 * mm
@@ -1047,7 +1051,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         section("Step 1 summary", y)
         y -= 8 * mm
         for row in step1StatsRows[:2]:
-            body(f"{row.get('Group','')}: mean {row.get('Mean_mm', None)} mm | SD {row.get('SD_mm', None)} | min {row.get('Min_mm', None)} | max {row.get('Max_mm', None)}", 20 * mm, y)
+            body(f"{row.get('Group','')}: mean {number(row.get('Mean_mm'))} mm | SD {number(row.get('SD_mm'))} | min {number(row.get('Min_mm'))} | max {number(row.get('Max_mm'))}", 20 * mm, y)
             y -= 6 * mm
         if step1DistRows:
             body("Filtered distribution:", 20 * mm, y)
@@ -1062,15 +1066,15 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         y -= 8 * mm
         if overallRows:
             row = overallRows[0]
-            body(f"Mean {row.get('Mean_mm', None)} mm | SD {row.get('SD_mm', None)} | min {row.get('Min_mm', None)} | max {row.get('Max_mm', None)}", 20 * mm, y)
+            body(f"Mean {number(row.get('Mean_mm'))} mm | SD {number(row.get('SD_mm'))} | min {number(row.get('Min_mm'))} | max {number(row.get('Max_mm'))}", 20 * mm, y)
             y -= 10 * mm
-        section("Pole summary", y)
+        section("Regional summary (experimental reference values)", y)
         y -= 8 * mm
         poleDistMap = {r['Pole']: r for r in poleDistRows}
         for row in poleRows:
             pole = row.get('Pole','')
             dist = poleDistMap.get(pole, {})
-            body(f"{pole}: mean {row.get('Mean_mm', None)} mm | ref {row.get('Reference_mm', None)} | diff {row.get('AbsoluteDifference_mm', None)}", 20 * mm, y)
+            body(f"{pole}: mean {number(row.get('Mean_mm'))} mm | experimental ref {number(row.get('Reference_mm'))} | diff {number(row.get('AbsoluteDifference_mm'))}", 20 * mm, y)
             y -= 5 * mm
             body(f"within ±0.5 mm {dist.get('WithinExpected_Percent',0):.2f}% | below {dist.get('BelowExpected_Percent',0):.2f}% | above {dist.get('AboveExpected_Percent',0):.2f}%", 24 * mm, y)
             y -= 8 * mm
@@ -1342,7 +1346,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         else:
             lines.append("No points available.\n")
 
-        lines.append("POLE-BASED ANALYSIS\n")
+        lines.append("REGIONAL ANALYSIS\n")
 
         rows = []
         ref_values_per_point = np.zeros(len(segments), dtype=float)
@@ -1355,12 +1359,12 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             weights = areaWeights[mask]
             ref = referenceValues[segId]
             label = labels[segId]
-            lines.append(f"--- {label} pole ---")
+            lines.append(f"--- {label} region ---")
             lines.append(f"Reference value: {ref:.4f} mm")
             lines.append(f"N points: {len(vals)}")
 
             if len(vals) == 0:
-                lines.append("No points in this pole.\n")
+                lines.append("No points in this region.\n")
                 poleStatsRows.append({"Pole":label,"Reference_mm":ref, **self.weightedStats(vals, weights), "AbsoluteDifference_mm":None,"PercentDifference":None})
                 poleDistRows.append({"Pole":label,"BelowExpected_Count":0,"BelowExpected_Percent":0.0,"WithinExpected_Count":0,"WithinExpected_Percent":0.0,"AboveExpected_Count":0,"AboveExpected_Percent":0.0})
                 continue
@@ -1404,7 +1408,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
         colorNode = self.createOrUpdateDiscreteReferenceComparisonColorNode()
         self.setModelDisplayWithColorNode(compNode, "ReferenceDelta", colorNode, -2.0, 2.0)
 
-        legendNode = self.addOrUpdateColorLegend(compNode, titleText="Difference from pole reference (mm)")
+        legendNode = self.addOrUpdateColorLegend(compNode, titleText="Difference from experimental reference (mm)")
         legendNode.SetVisibility(True)
         self.showOnlyFinalComparison()
         self.forceRender()
@@ -1414,7 +1418,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
             self.ensureDir(exportFolder)
             excelPath=self.getExcelPath(exportFolder); pdfPath=self.getPdfPath(exportFolder); summaryPdfPath=self.getPdfSummaryPath(exportFolder)
             step3Folder=self.ensureDir(os.path.join(exportFolder, "Step3"))
-            legendNode=self.addOrUpdateColorLegend(compNode, titleText="Difference from pole reference (mm)")
+            legendNode=self.addOrUpdateColorLegend(compNode, titleText="Difference from experimental reference (mm)")
             legendNode.SetVisibility(True)
             self.forceRender()
             exportedFiles=self.captureStandardViews(compNode, step3Folder, "Step3_ReferenceComparison")
@@ -1463,7 +1467,7 @@ class ATMJointSpaceAnalyzerLogic(ScriptedLoadableModuleLogic):
 
         self.lastStep3Data = {"overall_rows": overallRows, "pole_rows": poleStatsRows, "pole_distribution_rows": poleDistRows, "images": exportedFiles}
 
-        lines.append("REFERENCE COMPARISON MAP")
+        lines.append("REFERENCE COMPARISON MAP (EXPERIMENTAL - NOT CLINICALLY VALIDATED)")
         lines.append("Color interpretation:")
         lines.append("Red = distance below reference")
         lines.append("Strong green = within ±0.25 mm from reference")
