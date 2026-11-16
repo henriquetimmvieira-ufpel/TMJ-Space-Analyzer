@@ -1,10 +1,10 @@
 # Continuous, area-weighted statistics — development validation notes
 
-**Status: experimental branch, not a scientific release.** The original study implementation remains on \`main\`. No clinical data were re-analysed by these code changes.
+**Status: experimental branch, not a scientific release.** The original study implementation remains on `main`. No clinical data were re-analysed by these code changes.
 
 ## What changed
 
-- Retains continuous \`RawAbsoluteDistance\` arrays for all descriptive statistics; \`AbsoluteDistance\` remains rounded to 0.25 mm and capped at 4.5 mm **for colour mapping only**.
+- Retains continuous `RawAbsoluteDistance` arrays for all descriptive statistics; `AbsoluteDistance` remains rounded to 0.25 mm and capped at 4.5 mm **for colour mapping only**.
 - Estimates each vertex's representational surface area as one third of its incident triangle areas. Computes area-weighted mean, population SD, and weighted median; min and max use the original unrounded values.
 - Percentage distributions describe surface **area**, not percentage of vertices. Vertex counts remain separate descriptive fields.
 - Uses the actual extracted and connected filtered mesh, rather than the pre-extraction logical mask, for Step 1's filtered statistics.
@@ -19,9 +19,9 @@
 
 Tests may be run with NumPy and VTK installed:
 
-\`\`\`bash
+```bash
 python -m unittest discover -s tests -v
-\`\`\`
+```
 
 ## Required before a tagged release or Zenodo DOI
 
