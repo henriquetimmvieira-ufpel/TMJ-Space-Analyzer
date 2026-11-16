@@ -5,6 +5,16 @@ title: "TMJ Space Analyzer"
 version: "0.2.0"
 date-released: "2026-11-16"
 doi: "10.5281/zenodo.24286264"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.24286264"
+    description: "Concept DOI (all versions)"
+  - type: doi
+    value: "10.5281/zenodo.24290837"
+    description: "Version 0.2.0"
+  - type: doi
+    value: "10.5281/zenodo.24286265"
+    description: "Version 0.1.0 (implementation used in the original study)"
 authors:
   - family-names: Rios
     given-names: Gabriela Schneid
